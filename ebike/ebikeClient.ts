@@ -26,6 +26,25 @@ WoTHelpers.fetch("http://localhost:8080/smart-ebike").then(async (td) => {
             console.log(availability)
 
             const startAction = await thing.invokeAction("start");
+            //waiting for the action to complete
+            const startActionProperties = (await startAction.value());
+            if (startActionProperties.message != null){
+                console.log("=====================================")
+                console.log(startActionProperties.message)
+                console.log(startActionProperties.time)
+                console.log("=====================================")
+            }
+            await new Promise(f => setTimeout(f, 5000));
+
+            const stopAction = await thing.invokeAction("stop");
+            const stopActionProperties = (await stopAction.value());
+            if (stopActionProperties.message != null){
+                console.log("=====================================")
+                console.log(stopActionProperties.message)
+                console.log(stopActionProperties.time)
+                console.log("=====================================")
+            }
+            console.log("Total time spent: " + (stopActionProperties.time - startActionProperties.time))
         });
     }
     catch (err) {

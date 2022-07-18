@@ -12,6 +12,8 @@ interface EBike {
     altitude: number;
     availability: Availability;
     maintenanceNeeded: boolean;
+    startTripTime: number;
+    endTripTime: number;
 }
 
 interface Position {
@@ -127,11 +129,14 @@ async function init(){
             start: {
                 description: 'Start to use the eBike',
                 output: {
-                    type: "string",
-                    description: 'returns the timestamp',
+                    type: "object",
+                    description: 'Returns the time at which the bike has begun to be used and a message.',
                     properties:{
                         time:{
-                            type: "string",
+                           type:'number'
+                        },
+                        message: {
+                            type: 'string'
                         }
                     }
                 }
@@ -139,11 +144,14 @@ async function init(){
             stop: {
                 description: 'Stopped to use the eBike',
                 output: {
-                    type: "number",
-                    description: 'returns the price of the ride',
+                    type: "object",
+                    description: 'Returns the time at which the bike has been stopped.',
                     properties:{
                         time:{
-                            type: "string",
+                            type:'number'
+                        },
+                        message: {
+                            type: 'string'
                         }
                     }
                 }
@@ -168,6 +176,8 @@ async function init(){
         upTime: readFromSensor(),
         availability: Availability.Available,
         maintenanceNeeded: false,
+        startTripTime: null,
+        endTripTime: null,
     }
 
     thing.setPropertyReadHandler("position", async () => eBike.position);
@@ -186,6 +196,16 @@ async function init(){
         }
     })
 
+    thing.setActionHandler('start',  () => {
+        eBike.startTripTime = Date.now()
+        return { time: eBike.startTripTime, message: "Trip correctly begun"}
+    })
+
+    thing.setActionHandler('stop',  () => {
+        eBike.endTripTime = Date.now()
+        console.log((eBike.endTripTime-eBike.startTripTime)/1000)
+        return { time: eBike.endTripTime, message: "Trip correctly ended"}
+    })
 
     // Finally expose the thing
     thing.expose().then(() => {
