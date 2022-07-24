@@ -1,7 +1,9 @@
 // server
 // Required steps to create a servient for creating a thing
+
 const Servient = require('@node-wot/core').Servient;
 const HttpServer = require('@node-wot/binding-http').HttpServer;
+const schedule = require('node-schedule');
 
 interface EBike {
     upTime: number;
@@ -11,9 +13,14 @@ interface EBike {
     pressureBackWheel: number;
     altitude: number;
     availability: Availability;
+    //air quality
+    co2: number;
+    particulateMatter: number;
+
     maintenanceNeeded: boolean;
     startTripTime: number;
     endTripTime: number;
+    problems: Set<Problem>
 }
 
 interface Position {
@@ -25,6 +32,15 @@ enum Availability {
     Available,
     Unavailable,
     Booked,
+}
+
+enum Problem {
+    LowBattery,
+    AltitudeSensor,
+    PressureFrontWheel,
+    PressureBackWheel,
+    Altitude,
+    MaintenanceNeeded
 }
 
 let eBike: EBike
@@ -61,8 +77,23 @@ function notify(email, msg) {
 function readFromSensor(upTo: number = 100){
     return Math.floor(Math.random()*upTo)
 }
+
+function addProblem(p : Problem){
+    eBike.problems.add(p)
+    eBike.availability = Availability.Unavailable
+}
+
+function deleteProblem(p : Problem){
+    eBike.problems.delete(p)
+    if (eBike.problems.size == 0){
+        eBike.availability = Availability.Available
+    }
+}
+
+
 async function init(){
     let WoT = await servient.start()
+
 
     // Then from here on you can use the WoT object to produce the thing
     // i.e WoT.produce({.....})
@@ -70,6 +101,23 @@ async function init(){
         title: 'Smart eBike',
         description: 'A Smart eBike, equipped with several sensors',
         properties:{
+            everything:{
+                type: "object",
+                description: "Every eBike sensor",
+                eBike:{
+                    upTime: "number",
+                    position: {
+                        lat: "number",
+                       lng: "number",
+                    },
+                    battery: "number",
+                    pressureFrontWheel: "number",
+                    pressureBackWheel: "number",
+                    altitude: "number",
+                    availability: "string",
+                    maintenanceNeeded: "boolean",
+                }
+            },
             battery: {
                 type: "number",
                 description: 'Current battery level.',
@@ -90,6 +138,15 @@ async function init(){
                 description: 'Current pressure level of the back wheel expressed in bar.',
                 minimum:0,
             },
+            co2: {
+                type: "number",
+                description: 'Current level of co2.'
+            },
+            particulateMatter: {
+                type: "number",
+                description: 'Current level of particulate matter.'
+            }
+            ,
             altitude:{
                 type: "number",
                 description: 'Current altitude expressed in meters.',
@@ -135,6 +192,9 @@ async function init(){
                         time:{
                            type:'number'
                         },
+                        elapsedTime:{
+                            type:'number'
+                        },
                         message: {
                             type: 'string'
                         }
@@ -155,11 +215,29 @@ async function init(){
                         }
                     }
                 }
+            },
+            swapBattery: {
+                description: 'Battery charged successfully',
+                properties:{
+                    message: 'string'
+                }
             }
         },
         events:{
             lowBattery:{
                 description:'Battery is running low and need to be replaced',
+                data:{
+                    type:"string",
+                }
+            },
+            flatFrontWheel:{
+                description:'Front wheel is down',
+                data:{
+                    type:"string",
+                }
+            },
+            flatBackWheel:{
+                description:'Back wheel is down',
                 data:{
                     type:"string",
                 }
@@ -175,9 +253,12 @@ async function init(){
         pressureFrontWheel: readFromSensor(10),
         upTime: readFromSensor(),
         availability: Availability.Available,
+        co2: readFromSensor(),//maybe less than 100
+        particulateMatter:readFromSensor(), //maybe less than 100
         maintenanceNeeded: false,
         startTripTime: null,
         endTripTime: null,
+        problems: new Set<Problem>()
     }
 
     thing.setPropertyReadHandler("position", async () => eBike.position);
@@ -188,8 +269,21 @@ async function init(){
     thing.setPropertyReadHandler("altitude", async () => eBike.altitude);
     thing.setPropertyReadHandler("availability", async () => availabilityAsString(eBike.availability))
     thing.setPropertyReadHandler("speedometer", async () => readFromSensor(35))
+    thing.setPropertyReadHandler("everything", async () => {
+        return {
+            upTime: eBike.upTime,
+            position: eBike.position,
+            battery: eBike.battery,
+            pressureFrontWheel: eBike.pressureFrontWheel,
+            pressureBackWheel: eBike.pressureBackWheel,
+            altitude: eBike.altitude,
+            availability: eBike.availability,
+            maintenanceNeeded: eBike.maintenanceNeeded,
+        }
+    })
 
-    thing.setPropertyWriteHandler("availability", async (val, options) => {
+
+    thing.setPropertyWriteHandler("availability", async (val) => {
         eBike.availability = stringToAvailability(await val.value());
         if (eBike.availability == Availability.Unavailable) {
             notify("company@mail.com", "need to check this one")
@@ -197,14 +291,36 @@ async function init(){
     })
 
     thing.setActionHandler('start',  () => {
-        eBike.startTripTime = Date.now()
-        return { time: eBike.startTripTime, message: "Trip correctly begun"}
+        if (eBike.availability == Availability.Available && eBike.battery > 25) {
+            eBike.startTripTime = Date.now()
+            return { time: eBike.startTripTime, message: "Trip correctly begun"}
+        }
+        throw Error("this bike is currently unavailable or booked by another person")
     })
 
     thing.setActionHandler('stop',  () => {
-        eBike.endTripTime = Date.now()
-        console.log((eBike.endTripTime-eBike.startTripTime)/1000)
-        return { time: eBike.endTripTime, message: "Trip correctly ended"}
+        if (eBike.availability == Availability.Available){
+            eBike.endTripTime = Date.now()
+            const elapsedTime = ( eBike.endTripTime-eBike.startTripTime )
+            console.log(elapsedTime)
+            eBike.battery = eBike.battery - (elapsedTime / 1000)
+            eBike.upTime += elapsedTime
+            if (eBike.battery<=25){
+                addProblem(Problem.LowBattery)
+                thing.emitEvent("lowBattery", `Critical battery level!! Current level is: ${eBike.battery}`);
+            }
+            if (eBike.upTime > 100) {
+                addProblem(Problem.MaintenanceNeeded)
+                notify("company@mail.com", "need to check this one")
+            }
+            return { time: eBike.endTripTime, elapsedTime: elapsedTime ,message: "Trip correctly ended"}
+        }
+        throw Error("this bike is currently unavailable or booked by another person")
+    })
+
+    thing.setActionHandler('swapBattery', ()=>{
+        eBike.battery = 100;
+       deleteProblem(Problem.LowBattery)
     })
 
     // Finally expose the thing
@@ -212,6 +328,23 @@ async function init(){
         console.info(`${thing.getThingDescription().title} ready`);
     });
     console.log(`Produced ${thing.getThingDescription().title}`);
+
+    const job = schedule.scheduleJob('* * * * *', function(){
+        console.log("=============================================")
+        console.log('checkup!');
+        console.log("=============================================")
+        checkup(thing)
+    });
 }
 
+function checkup(thing) {
+    if (eBike.pressureBackWheel< 3) {
+        addProblem(Problem.PressureBackWheel)
+        thing.emitEvent("flatBackWheel", `Back wheel is down, it must be changed`);
+    }
+    if (eBike.pressureFrontWheel< 3) {
+        addProblem(Problem.PressureFrontWheel)
+        thing.emitEvent("flatFrontWheel", `Front wheel is down, it must be changed`);
+    }
+}
 init().catch((e) => console.log(e))
