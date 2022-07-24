@@ -111,6 +111,8 @@ async function init(){
                        lng: "number",
                     },
                     battery: "number",
+                    co2: "number",
+                    particulateMatter: "number",
                     pressureFrontWheel: "number",
                     pressureBackWheel: "number",
                     altitude: "number",
@@ -269,6 +271,8 @@ async function init(){
     thing.setPropertyReadHandler("altitude", async () => eBike.altitude);
     thing.setPropertyReadHandler("availability", async () => availabilityAsString(eBike.availability))
     thing.setPropertyReadHandler("speedometer", async () => readFromSensor(35))
+    thing.setPropertyReadHandler("co2", async () => readFromSensor())
+    thing.setPropertyReadHandler("particulateMatter", async () => readFromSensor())
     thing.setPropertyReadHandler("everything", async () => {
         return {
             upTime: eBike.upTime,
@@ -348,3 +352,4 @@ function checkup(thing) {
     }
 }
 init().catch((e) => console.log(e))
+//it could save a snapshot of every read from every sensor every x seconds and then save it to a file or in a set.
