@@ -21,6 +21,8 @@ interface EBike {
     startTripTime: number;
     endTripTime: number;
     problems: Set<Problem>
+
+    booking:Booking;
 }
 
 interface Position {
@@ -41,6 +43,10 @@ enum Problem {
     PressureBackWheel,
     Altitude,
     MaintenanceNeeded
+}
+interface Booking {
+    from: String;
+    expirationDate: number;
 }
 
 let eBike: EBike
@@ -90,7 +96,40 @@ function deleteProblem(p : Problem){
     }
 }
 
+function getAvailability():Availability{
+    if (eBike.booking == null || Date.now() > eBike.booking.expirationDate){
+        if ( eBike.problems.size == 0 ) {
+            eBike.availability = Availability.Available
+        } else {
+             eBike.availability = Availability.Unavailable
+        }
+    }
+    return eBike.availability
+}
+function book(from : String ):String{
+    if (eBike.availability== Availability.Available){
+        //book for 30 minutes
+        const booking = {
+            from: from,
+            expirationDate: Date.now()+(1000 * 60 * 30)
+        }
+        eBike.booking = booking
+        eBike.availability = Availability.Booked
+        return "Bike correctly booked until "+ eBike.booking.expirationDate
+    }
+    throw Error("This bike can not be booked")
+}
 
+function unBook(from: String): String {
+    if (getAvailability() != Availability.Booked) {
+        throw Error("This bike is not booked")
+    }
+    if (eBike.booking.from != from) {
+        throw Error("Only the person who booked this bike can remove the booking from it")
+    }
+    eBike.booking = null
+    return "This bike is now "+ availabilityAsString(getAvailability())
+}
 async function init(){
     let WoT = await servient.start()
 
@@ -223,7 +262,19 @@ async function init(){
                 properties:{
                     message: 'string'
                 }
-            }
+            },
+            book: {
+                description: "Book this bike for 30 minutes",
+                data: {
+                    type:"string",
+                }
+            },
+            unBook: {
+                description: "unBook this bike for 30 minutes",
+                data: {
+                    type:"string",
+                }
+            },
         },
         events:{
             lowBattery:{
@@ -243,7 +294,7 @@ async function init(){
                 data:{
                     type:"string",
                 }
-            }
+            },
         }
     })
 
@@ -260,7 +311,8 @@ async function init(){
         maintenanceNeeded: false,
         startTripTime: null,
         endTripTime: null,
-        problems: new Set<Problem>()
+        problems: new Set<Problem>(),
+        booking: null,
     }
 
     thing.setPropertyReadHandler("position", async () => eBike.position);
@@ -269,7 +321,10 @@ async function init(){
     thing.setPropertyReadHandler("pressureBackWheel", async () => eBike.pressureBackWheel);
     thing.setPropertyReadHandler("pressureFrontWheel", async () => eBike.pressureFrontWheel);
     thing.setPropertyReadHandler("altitude", async () => eBike.altitude);
-    thing.setPropertyReadHandler("availability", async () => availabilityAsString(eBike.availability))
+    thing.setPropertyReadHandler("availability", async () => {
+        getAvailability()
+        return availabilityAsString(eBike.availability)
+    })
     thing.setPropertyReadHandler("speedometer", async () => readFromSensor(35))
     thing.setPropertyReadHandler("co2", async () => readFromSensor())
     thing.setPropertyReadHandler("particulateMatter", async () => readFromSensor())
@@ -324,7 +379,15 @@ async function init(){
 
     thing.setActionHandler('swapBattery', ()=>{
         eBike.battery = 100;
-       deleteProblem(Problem.LowBattery)
+        deleteProblem(Problem.LowBattery)
+        return "Battery is now at "+ eBike.battery
+    })
+
+    thing.setActionHandler("book", async (params)=> {
+        const paramsp = await params.value();
+        if (paramsp && typeof paramsp === "object" && "user" in paramsp ) {
+            return book(paramsp.user);
+        }
     })
 
     // Finally expose the thing
@@ -349,6 +412,9 @@ function checkup(thing) {
     if (eBike.pressureFrontWheel< 3) {
         addProblem(Problem.PressureFrontWheel)
         thing.emitEvent("flatFrontWheel", `Front wheel is down, it must be changed`);
+    }
+    if (eBike.availability == Availability.Booked) {
+        getAvailability()
     }
 }
 init().catch((e) => console.log(e))
