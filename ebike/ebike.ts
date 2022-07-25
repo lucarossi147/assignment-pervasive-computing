@@ -109,11 +109,10 @@ function getAvailability():Availability{
 function book(from : String ):String{
     if (eBike.availability== Availability.Available){
         //book for 30 minutes
-        const booking = {
+        eBike.booking = {
             from: from,
-            expirationDate: Date.now()+(1000 * 60 * 30)
+            expirationDate: Date.now() + (1000 * 60 * 30)
         }
-        eBike.booking = booking
         eBike.availability = Availability.Booked
         return "Bike correctly booked until "+ eBike.booking.expirationDate
     }
@@ -130,6 +129,13 @@ function unBook(from: String): String {
     eBike.booking = null
     return "This bike is now "+ availabilityAsString(getAvailability())
 }
+
+function requireMaintenance() {
+    eBike.maintenanceNeeded = true
+    addProblem(Problem.MaintenanceNeeded)
+    notify("company@mail.com", "need to check this one")
+}
+
 async function init(){
     let WoT = await servient.start()
 
@@ -270,9 +276,15 @@ async function init(){
                 }
             },
             unBook: {
-                description: "unBook this bike for 30 minutes",
+                description: "Unbook this bike for 30 minutes",
                 data: {
                     type:"string",
+                }
+            },
+            performMaintenance: {
+                description: "Perform maintenance on the bike and solve all its problems",
+                data: {
+                    type: "string",
                 }
             },
         },
@@ -302,8 +314,8 @@ async function init(){
         altitude: readFromSensor(),
         battery: readFromSensor(),
         position: {lat : readFromSensor(), lng : readFromSensor()},
-        pressureBackWheel: readFromSensor(10),
-        pressureFrontWheel: readFromSensor(10),
+        pressureBackWheel: 7,
+        pressureFrontWheel: 7,
         upTime: readFromSensor(),
         availability: Availability.Available,
         co2: readFromSensor(),//maybe less than 100
@@ -361,16 +373,14 @@ async function init(){
         if (eBike.availability == Availability.Available){
             eBike.endTripTime = Date.now()
             const elapsedTime = ( eBike.endTripTime-eBike.startTripTime )
-            console.log(elapsedTime)
             eBike.battery = eBike.battery - (elapsedTime / 1000)
             eBike.upTime += elapsedTime
             if (eBike.battery<=25){
                 addProblem(Problem.LowBattery)
                 thing.emitEvent("lowBattery", `Critical battery level!! Current level is: ${eBike.battery}`);
             }
-            if (eBike.upTime > 100) {
-                addProblem(Problem.MaintenanceNeeded)
-                notify("company@mail.com", "need to check this one")
+            if (eBike.upTime > 1000 * 60 ) { //one minute
+                requireMaintenance()
             }
             return { time: eBike.endTripTime, elapsedTime: elapsedTime ,message: "Trip correctly ended"}
         }
@@ -390,13 +400,24 @@ async function init(){
         }
     })
 
+    thing.setActionHandler("performMaintenance", ()=> {
+        eBike.problems.clear()
+        eBike.upTime = 0
+        eBike.maintenanceNeeded = false
+        eBike.battery = 100
+        eBike.pressureBackWheel = 7
+        eBike.pressureFrontWheel = 7
+        return "Correctly performed maintenance"
+    })
+
+
     // Finally expose the thing
     thing.expose().then(() => {
         console.info(`${thing.getThingDescription().title} ready`);
     });
     console.log(`Produced ${thing.getThingDescription().title}`);
 
-    const job = schedule.scheduleJob('* * * * *', function(){
+    schedule.scheduleJob('* * * * *', function(){
         console.log("=============================================")
         console.log('checkup!');
         console.log("=============================================")
@@ -416,6 +437,7 @@ function checkup(thing) {
     if (eBike.availability == Availability.Booked) {
         getAvailability()
     }
+    console.log(eBike)
 }
 init().catch((e) => console.log(e))
 //it could save a snapshot of every read from every sensor every x seconds and then save it to a file or in a set.
