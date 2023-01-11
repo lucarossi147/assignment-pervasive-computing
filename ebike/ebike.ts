@@ -12,6 +12,7 @@ interface EBike {
     pressureFrontWheel: number;
     pressureBackWheel: number;
     altitude: number;
+    temperature: number;
     availability: Availability;
     //air quality
     co2: number;
@@ -130,8 +131,9 @@ function unBook(from: String): String {
     return "This bike is now "+ availabilityAsString(getAvailability())
 }
 
-function requireMaintenance() {
+function requireMaintenance(thing) {
     eBike.maintenanceNeeded = true
+    thing.emitEvent("maintenanceNeeded", true);
     addProblem(Problem.MaintenanceNeeded)
     notify("company@mail.com", "need to check this one")
 }
@@ -143,6 +145,7 @@ async function init(){
     // Then from here on you can use the WoT object to produce the thing
     // i.e WoT.produce({.....})
     let thing = await WoT.produce({
+	'@type': 'ebike',
         title: 'Smart eBike',
         description: 'A Smart eBike, equipped with several sensors',
         properties:{
@@ -161,6 +164,7 @@ async function init(){
                     pressureFrontWheel: "number",
                     pressureBackWheel: "number",
                     altitude: "number",
+                    temperature: "number",
                     availability: "string",
                     maintenanceNeeded: "boolean",
                 }
@@ -307,11 +311,16 @@ async function init(){
                     type:"string",
                 }
             },
+            maintenanceNeeded:{
+                description:'Maintenance Needed',
+                type: "boolean"
+            },
         }
     })
 
     eBike = {
         altitude: readFromSensor(),
+        temperature: readFromSensor(40),
         battery: readFromSensor(),
         position: {lat : readFromSensor(), lng : readFromSensor()},
         pressureBackWheel: 7,
@@ -327,17 +336,22 @@ async function init(){
         booking: null,
     }
 
+    thing.setPropertyReadHandler("maintenanceNeeded", async () => eBike.maintenanceNeeded);
     thing.setPropertyReadHandler("position", async () => eBike.position);
     thing.setPropertyReadHandler("battery", async () => eBike.battery);
     thing.setPropertyReadHandler("upTime", async () => eBike.upTime);
     thing.setPropertyReadHandler("pressureBackWheel", async () => eBike.pressureBackWheel);
     thing.setPropertyReadHandler("pressureFrontWheel", async () => eBike.pressureFrontWheel);
     thing.setPropertyReadHandler("altitude", async () => eBike.altitude);
+    thing.setPropertyReadHandler("temperature", async () => eBike.temperature);
     thing.setPropertyReadHandler("availability", async () => {
-        getAvailability()
+        eBike.availability = getAvailability()
         return availabilityAsString(eBike.availability)
     })
-    thing.setPropertyReadHandler("speedometer", async () => readFromSensor(35))
+    thing.setPropertyReadHandler("speedometer", async () => {
+        console.log("speedometer")
+        readFromSensor(35)
+    })
     thing.setPropertyReadHandler("co2", async () => readFromSensor())
     thing.setPropertyReadHandler("particulateMatter", async () => readFromSensor())
     thing.setPropertyReadHandler("everything", async () => {
@@ -362,6 +376,7 @@ async function init(){
     })
 
     thing.setActionHandler('start',  () => {
+        console.log("start received!")
         if (eBike.availability == Availability.Available && eBike.battery > 25) {
             eBike.startTripTime = Date.now()
             return { time: eBike.startTripTime, message: "Trip correctly begun"}
@@ -380,7 +395,7 @@ async function init(){
                 thing.emitEvent("lowBattery", `Critical battery level!! Current level is: ${eBike.battery}`);
             }
             if (eBike.upTime > 1000 * 60 ) { //one minute
-                requireMaintenance()
+                requireMaintenance(thing)
             }
             return { time: eBike.endTripTime, elapsedTime: elapsedTime ,message: "Trip correctly ended"}
         }
